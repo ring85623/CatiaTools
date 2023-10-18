@@ -1,3 +1,3 @@
 # CatiaTools
 using Catia PartBody To Part File
-And Top Part Work to Product
+And Top Part trans to Product
