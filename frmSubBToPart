@@ -1,0 +1,183 @@
+Imports MECMOD
+Imports ProductStructureTypeLib
+Imports INFITF
+
+Public Class frmSubBToPart
+
+#Region "   User32     "
+
+    Public Declare Function SetForegroundWindow Lib "user32" (ByVal hWnd As IntPtr) As Long
+    Public Declare Function ShowWindowAsync Lib "user32" (ByVal hwnd As IntPtr, ByVal intCmdShow As Integer) As Boolean '視窗顯示
+    Public Declare Function IsIconic Lib "user32" (ByVal hwnd As IntPtr) As Boolean   '是否最小化
+    '設定視窗型式常數
+    Private Const SW_HIDE As Integer = 0
+    Private Const SW_NORMAL As Integer = 1
+    Private Const SW_MAXIMIZE As Integer = 3
+    Private Const SW_SHOWNOACTIVATE As Integer = 4
+    Private Const SW_SHOW As Integer = 5
+    Private Const SW_MINIMIZE As Integer = 6
+    Private Const SW_RESTORE As Integer = 9
+    Private Const SW_SHOWDEFAULT As Integer = 10
+
+#End Region
+
+#Region "   Public Declaration     "
+
+    Private LobjCatia As INFITF.Application
+    Public GstrAutocadAppName As String = "CATIA.Application"
+
+#End Region
+
+#Region "   Private Function   "
+
+    '檢查視窗有無開啟或藏起來
+    Public Function CheckAndShowWindow(ByVal proProcesses As Process, ByRef strErrMsg As String) As Boolean
+        CheckAndShowWindow = False
+        Try
+            '20170918 如果存在已開啟的程式，則將該程式顯示到最前端
+            If IsIconic(proProcesses.MainWindowHandle) Then
+                ShowWindowAsync(proProcesses.MainWindowHandle, 9)
+            End If
+            SetForegroundWindow(proProcesses.MainWindowHandle)
+            CheckAndShowWindow = True
+        Catch ex As Exception
+            strErrMsg = ex.Message & System.Environment.NewLine & ex.StackTrace
+        End Try
+    End Function
+    '取得CATIA軟體資訊
+    Public Function ExtractCatiaApplication(ByRef strErrMsg As String) As INFITF.Application
+        ExtractCatiaApplication = Nothing
+        Try
+            ExtractCatiaApplication = CType(GetObject(, GstrAutocadAppName), INFITF.Application)
+        Catch ex As Exception
+            strErrMsg = "無法取得CATIA應用程式，請確定CATIA是否正常開啟"
+        End Try
+    End Function
+
+#End Region
+
+#Region "   Form   "
+
+    Private Sub frmSubBToPart_Load(sender As System.Object, e As System.EventArgs) Handles MyBase.Load
+        Dim clsFormFeature As New ShareFeatures.clsFormFeature
+        Dim proProcesses() As System.Diagnostics.Process
+        Dim strErrMsg As String = String.Empty
+        Try
+            '檢查程式是否重複開啟/若無則彈到最上層
+            Me.TopMost = True : Me.TopMost = False
+            proProcesses = System.Diagnostics.Process.GetProcessesByName(System.Windows.Forms.Application.ProductName)
+            If proProcesses.Length > 1 Then
+                CheckAndShowWindow(proProcesses(0), strErrMsg)
+                MessageBox.Show("程式已經開啟，請避免開啟多個程式", "錯誤訊息", MessageBoxButtons.OK, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1, MessageBoxOptions.DefaultDesktopOnly) : Me.Close() : Exit Try
+            End If
+            '固定介面大小
+            Me.MaximumSize = Me.Size : Me.MinimumSize = Me.Size
+            '讀取CATIA應用程式
+            LobjCatia = ExtractCatiaApplication(strErrMsg)
+            If LobjCatia Is Nothing Then
+                MessageBox.Show(strErrMsg, "錯誤訊息", MessageBoxButtons.OK, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1, MessageBoxOptions.DefaultDesktopOnly) : Me.Close() : Exit Try
+            End If
+            '設定介面
+            'clsFormFeature.SetSkinFile(SkinEngine, ShareFeatures.clsFormFeature.UIsettingEnum.mp10mulberry)
+        Catch ex As Exception
+            MessageBox.Show(ex.Message & System.Environment.NewLine & ex.StackTrace)
+        End Try
+    End Sub
+
+#End Region
+
+#Region "   Button   "
+
+    Private Sub btnTrans_Click(sender As System.Object, e As System.EventArgs) Handles btnTrans.Click
+
+        Dim CatiaAcDocument As INFITF.Document
+        Dim CatiaSourPartDocument As PartDocument
+        Dim CatiaSourPart As Part
+        Dim CatiaSourProduct As Product
+        Dim CatiaDestPartDocument As PartDocument
+        Dim CatiaDestPart As Part
+        Dim CatiaProductDocument As ProductDocument
+        Dim CatiaProduct As Product
+        Dim CatiaProducts As Products
+        Dim objBodies As Bodies
+        Dim objBody As Body
+        Dim CatiaSelectionSour As Selection
+        Dim CatiaSelectionDest As Selection
+        'Dim CatiaShape As MECMOD.Shape
+        Dim intValues As Integer = 0
+
+        Dim strCatDocName As String = String.Empty
+        Try
+            ProgressBar.Minimum = 0 : ProgressBar.Maximum = 10 : ProgressBar.Value = 0
+            If LobjCatia.Documents.Count > 0 Then
+                '讀取目前CATIA活躍的零件圖檔
+                CatiaAcDocument = LobjCatia.ActiveDocument
+                strCatDocName = IO.Path.GetExtension(CatiaAcDocument.Name)
+                If strCatDocName.IndexOf(".CATPart") > -1 Then
+                    '讀取PartBody資料
+                    CatiaSourPartDocument = CType(CatiaAcDocument, PartDocument)
+                    CatiaSourPart = CatiaSourPartDocument.Part
+                    CatiaSourProduct = CType(CatiaSourPartDocument.GetItem(CatiaSourPart.Name.ToString.Trim), Product)
+                    lblSystemMsg.Text = "Loading PartBody Informtion" : System.Windows.Forms.Application.DoEvents()
+                    objBodies = CatiaSourPart.Bodies
+                    If objBodies.Count > 1 Then
+                        For Each objBody In objBodies
+                            intValues = intValues + 1
+                        Next
+                        ProgressBar.Maximum = intValues + 3
+                        '新建立Product，並將資料同步於Part
+                        lblSystemMsg.Text = "Create New Product File And Update Data" : System.Windows.Forms.Application.DoEvents()
+                        CatiaProductDocument = CType(LobjCatia.Documents.Add("Product"), ProductDocument)
+                        CatiaProduct = CatiaProductDocument.Product
+                        CatiaProducts = CatiaProduct.Products
+                        CatiaProduct.PartNumber = CatiaSourProduct.PartNumber
+                        ProgressBar.Value += 1
+                        For Each objBody In objBodies
+                            'For Each CatiaShape In objBody.Shapes
+                            '    MessageBox.Show(CatiaShape.Name)
+
+                            'Next
+                            '建立子接零件資料
+                            'If objBody.Name = "PartBody" Then Continue For
+                            lblSystemMsg.Text = "Trans Body To New Part File With [" & objBody.Name & "]" : System.Windows.Forms.Application.DoEvents()
+                            CatiaProducts.AddNewComponent("Part", objBody.Name)
+                            '複製Body組成
+                            CatiaSelectionSour = CatiaSourPartDocument.Selection
+                            CatiaSelectionSour.Clear()
+                            CatiaSelectionSour.Add(objBody)
+                            CatiaSelectionSour.Copy()
+                            '讀取目的地零件資料
+                            CatiaDestPartDocument = CType(LobjCatia.Documents.Item(objBody.Name & ".CATPart"), PartDocument)
+                            CatiaDestPartDocument.Activate()
+                            CatiaDestPart = CatiaDestPartDocument.Part
+                            '貼上組成
+                            CatiaSelectionDest = CatiaProductDocument.Selection
+                            CatiaSelectionDest.Clear()
+                            CatiaSelectionDest.Add(CatiaDestPart)
+                            CatiaSelectionDest.PasteSpecial("CATPrtResult")
+                            CatiaSelectionSour.Clear() : CatiaSelectionDest.Clear()
+                            ProgressBar.Value += 1
+                        Next
+                        '更新圖檔畫面
+                        lblSystemMsg.Text = "Update The Product File" : System.Windows.Forms.Application.DoEvents()
+                        ProgressBar.Value += 1
+                        CatiaProduct.Update()
+                        lblSystemMsg.Text = "Trans File Complete！" : System.Windows.Forms.Application.DoEvents()
+                        ProgressBar.Value += 1
+                    Else
+                        MessageBox.Show("零件並未有任何PartBody(不包含預設)", "錯誤訊息", MessageBoxButtons.OK, MessageBoxIcon.Error) : Exit Try
+                    End If
+                Else
+                    MessageBox.Show("只能轉換零件圖檔", "錯誤訊息", MessageBoxButtons.OK, MessageBoxIcon.Error) : Exit Try
+                End If
+            Else
+                MessageBox.Show("請開啟一張圖檔", "錯誤訊息", MessageBoxButtons.OK, MessageBoxIcon.Error) : Exit Try
+            End If
+        Catch ex As Exception
+            MessageBox.Show(ex.Message & System.Environment.NewLine & ex.StackTrace)
+        End Try
+    End Sub
+
+#End Region
+
+End Class
